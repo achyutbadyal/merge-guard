@@ -1,0 +1,38 @@
+/* Merge controls are never removed. content.ts tags them with data-mmf-method and
+   either marks them data-mmf-blocked (with a tooltip) or leaves them alone. While
+   rules are still being evaluated, <html data-mmf-loading> shows them as pending. */
+
+html[data-mmf-loading] [data-mmf-method],
+[data-mmf-method][data-mmf-blocked] {
+  opacity: 0.5;
+  filter: grayscale(0.85);
+  cursor: not-allowed !important;
+}
+[data-mmf-method][data-mmf-blocked] * {
+  cursor: not-allowed !important;
+}
+
+html[data-mmf-loading] [data-mmf-method] {
+  cursor: progress !important;
+  animation: mmf-pulse 1.1s ease-in-out infinite;
+}
+html[data-mmf-loading] [data-mmf-method] * {
+  cursor: progress !important;
+}
+
+@keyframes mmf-pulse {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 0.7; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-mmf-loading] [data-mmf-method] { animation: none; }
+}
+
+/* While we silently switch the selected method, keep the dropdown from flashing. */
+html[data-mmf-selecting] [role="menu"],
+html[data-mmf-selecting] .select-menu-modal,
+html[data-mmf-selecting] [data-component="Overlay"] {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}

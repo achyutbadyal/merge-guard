@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Merge Guard</title>
+  <link rel="stylesheet" href="common.css" />
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <div class="pop">
+    <div id="repo" class="repo mono"></div>
+    <div id="source" class="muted"></div>
+    <div id="methods" class="methods"></div>
+    <div id="actions" class="actions">
+      <button id="save-repo" class="btn">Apply to this repo</button>
+      <button id="save-org" class="btn">Apply to whole org</button>
+    </div>
+    <button id="options" class="btn ghost">Open all settings</button>
+  </div>
+  <div id="toast" class="toast" role="status"></div>
+  <script src="popup.js"></script>
+</body>
+</html>

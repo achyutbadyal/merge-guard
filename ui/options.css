@@ -1,0 +1,71 @@
+main { max-width: 860px; margin: 0 auto; padding: 32px 20px 64px; display: grid; gap: 16px; }
+h1 { font-size: 24px; margin: 0 0 4px; }
+h2 { font-size: 16px; margin: 0; }
+h3 { margin: 0 0 12px; }
+.muted { color: var(--muted); }
+p { margin: 4px 0 12px; }
+.page-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px 20px; }
+.card .btn, .card .seg, .card input[type="text"] { background-clip: padding-box; }
+.section-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 6px; }
+.toolbar { display: flex; gap: 8px; flex-wrap: wrap; }
+.row { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+.methods { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.quick { display: flex; gap: 8px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
+.quick label { color: var(--muted); }
+.quick input { width: 220px; }
+
+.rules { display: grid; gap: 10px; }
+.empty { text-align: center; padding: 18px 0 4px; }
+.rule {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  grid-template-areas: "grip sw fields" ". . methods";
+  gap: 10px 12px;
+  align-items: start;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  position: relative;
+}
+.rule.disabled .fields, .rule.disabled .methods { opacity: .55; }
+.rule.dragging { opacity: .4; }
+.rule.drop-before { box-shadow: 0 -3px 0 0 var(--accent); }
+.rule.drop-after { box-shadow: 0 3px 0 0 var(--accent); }
+.rule.hit { border-color: var(--accent); }
+.grip { grid-area: grip; cursor: grab; color: var(--muted); padding-top: 6px; background: none; border: 0; }
+.sw { grid-area: sw; padding-top: 5px; }
+.sw input { width: 16px; height: 16px; accent-color: var(--accent); }
+.fields { grid-area: fields; display: grid; gap: 6px; }
+.fields .pattern { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; }
+.rule .methods { grid-area: methods; }
+.rule-actions { position: absolute; top: 8px; right: 8px; display: flex; }
+.fields .name { padding-right: 110px; font-weight: 600; }
+.status { font-size: 12.5px; min-height: 0; }
+.status:empty { display: none; }
+.status.err { color: var(--red); }
+.status.warn { color: var(--warn); }
+.badge { display: inline-block; font-size: 11px; padding: 0 6px; border-radius: 999px; margin-left: 6px; background: var(--accent); color: #fff; }
+
+.test-result { margin-top: 12px; display: grid; gap: 8px; }
+.test-result .line { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.test-result .winner { font-weight: 600; }
+.chips { display: inline-flex; gap: 10px; }
+.chip { display: inline-flex; align-items: center; gap: 4px; }
+.chip.on { color: var(--green); }
+.chip.off { color: var(--red); }
+.chip span.t { color: var(--text); }
+
+dialog { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); color: var(--text); padding: 20px; width: min(640px, 92vw); }
+dialog::backdrop { background: rgb(0 0 0 / .45); }
+.move { display: grid; grid-template-columns: 56px 1fr; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--border); align-items: baseline; }
+.move .pos { color: var(--muted); font-variant-numeric: tabular-nums; }
+.move.same { color: var(--muted); }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.note { font-size: 12.5px; color: var(--warn); }
+
+@media (max-width: 560px) {
+  .rule { grid-template-columns: auto 1fr; grid-template-areas: "grip fields" "sw fields" "methods methods"; }
+}

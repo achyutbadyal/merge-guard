@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Merge Guard</title>
+  <link rel="stylesheet" href="common.css" />
+  <link rel="stylesheet" href="options.css" />
+</head>
+<body>
+  <main>
+    <header class="page-head">
+      <div>
+        <h1>Merge Guard</h1>
+        <p class="muted">Choose which merge buttons GitHub shows on pull requests. This only hides buttons; enforce policy in repository settings too.</p>
+      </div>
+    </header>
+
+    <section class="card" aria-labelledby="h-default">
+      <h2 id="h-default">Default policy</h2>
+      <p class="muted">Applies to every repo that no rule below matches.</p>
+      <div class="row">
+        <div id="default-mode" class="seg" role="group" aria-label="Default mode"></div>
+        <div id="default-methods" class="methods"></div>
+      </div>
+    </section>
+
+    <section class="card" aria-labelledby="h-rules">
+      <div class="section-head">
+        <h2 id="h-rules">Rules</h2>
+        <div class="toolbar">
+          <button id="optimize" class="btn" title="Reorder rules from most to least specific">Optimize rules</button>
+          <button id="undo" class="btn" hidden>Undo</button>
+          <button id="import" class="btn">Import</button>
+          <button id="export" class="btn">Export</button>
+          <button id="add" class="btn primary">Add rule</button>
+        </div>
+      </div>
+      <p class="muted">
+        Patterns are regular expressions tested against <code>host/owner/repo/</code> from the start, ignoring case.
+        <code>github\.com/acme/</code> matches every repo in <em>acme</em>; add <code>repo/</code> for one repo.
+        The <strong>first matching rule wins</strong>, so keep specific rules above general ones.
+      </p>
+      <form id="quick" class="quick">
+        <label for="quick-org">Only squash for an org</label>
+        <input id="quick-org" type="text" placeholder="org name, e.g. acme" autocomplete="off" spellcheck="false" />
+        <button class="btn">Add</button>
+      </form>
+      <div id="rules" class="rules"></div>
+      <p id="rules-empty" class="empty muted" hidden>No rules yet. Everything follows the default policy.</p>
+      <input id="import-file" type="file" accept="application/json,.json" hidden />
+    </section>
+
+    <section class="card" aria-labelledby="h-test">
+      <h2 id="h-test">Test a URL</h2>
+      <input id="test-url" type="text" placeholder="https://github.com/acme/app/pull/42" autocomplete="off" spellcheck="false" aria-label="URL to test" />
+      <div id="test-result" class="test-result" aria-live="polite"></div>
+    </section>
+  </main>
+
+  <dialog id="opt-dialog">
+    <form method="dialog">
+      <h3>Optimize rule order</h3>
+      <div id="opt-body"></div>
+      <div class="dialog-actions">
+        <button value="cancel" class="btn">Cancel</button>
+        <button id="opt-apply" value="apply" class="btn primary">Apply</button>
+      </div>
+    </form>
+  </dialog>
+  <div id="toast" class="toast" role="status"></div>
+  <script src="options.js"></script>
+</body>
+</html>

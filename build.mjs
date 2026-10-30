@@ -1,53 +1,29 @@
 // Bundles TypeScript with esbuild and assembles dist/chrome and dist/firefox.
 import { build, context } from 'esbuild';
 import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { deflateSync, crc32 } from 'node:zlib';
+import { Resvg } from '@resvg/resvg-js';
 
 const watch = process.argv.includes('--watch');
 const targets = ['chrome', 'firefox'];
 
-/* ---- icons: green disc with a white tick, rendered with 4x4 supersampling ---- */
-function iconPng(size) {
-  const px = Buffer.alloc(size * size * 4);
-  const seg = (x, y, ax, ay, bx, by) => {
-    const dx = bx - ax, dy = by - ay;
-    const t = Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / (dx * dx + dy * dy)));
-    return Math.hypot(x - (ax + t * dx), y - (ay + t * dy));
-  };
-  const S = 4;
-  for (let py = 0; py < size; py++) {
-    for (let pxl = 0; pxl < size; pxl++) {
-      let disc = 0, tick = 0;
-      for (let sy = 0; sy < S; sy++) {
-        for (let sx = 0; sx < S; sx++) {
-          const x = (pxl + (sx + 0.5) / S) / size, y = (py + (sy + 0.5) / S) / size;
-          if (Math.hypot(x - 0.5, y - 0.5) <= 0.48) {
-            disc++;
-            const d = Math.min(seg(x, y, 0.28, 0.52, 0.44, 0.67), seg(x, y, 0.44, 0.67, 0.73, 0.35));
-            if (d <= 0.055) tick++;
-          }
-        }
-      }
-      const n = S * S, a = disc / n, w = disc ? tick / disc : 0;
-      const o = (py * size + pxl) * 4;
-      px[o] = Math.round(26 * (1 - w) + 255 * w);
-      px[o + 1] = Math.round(127 * (1 - w) + 255 * w);
-      px[o + 2] = Math.round(55 * (1 - w) + 255 * w);
-      px[o + 3] = Math.round(a * 255);
-    }
-  }
-  const raw = Buffer.alloc((size * 4 + 1) * size);
-  for (let y = 0; y < size; y++) px.copy(raw, y * (size * 4 + 1) + 1, y * size * 4, (y + 1) * size * 4);
-  const chunk = (type, data) => {
-    const len = Buffer.alloc(4); len.writeUInt32BE(data.length);
-    const body = Buffer.concat([Buffer.from(type), data]);
-    const crc = Buffer.alloc(4); crc.writeUInt32BE(crc32(body) >>> 0);
-    return Buffer.concat([len, body, crc]);
-  };
-  const ihdr = Buffer.alloc(13);
-  ihdr.writeUInt32BE(size, 0); ihdr.writeUInt32BE(size, 4); ihdr[8] = 8; ihdr[9] = 6;
-  return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr), chunk('IDAT', deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
+/* ---- icons: GitHub-style "merged" glyph, white on purple, drawn as SVG and rasterized with resvg ---- */
+function iconSvg(size) {
+  // Heavier strokes at toolbar sizes; at 16px rings blur, so nodes become solid dots.
+  const tiny = size <= 16, small = size <= 32;
+  const w = tiny ? 14 : small ? 12 : 9, r = tiny ? 12 : small ? 11 : 10;
+  const node = ([x, y]) => `<circle cx="${x}" cy="${y}" r="${r}"${tiny ? ' fill="#fff"' : ''}/>`;
+  const A = [44, 34], B = [44, 94], C = [88, 70]; // top, bottom, merged-into nodes on a 128 grid
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="${size}" height="${size}">
+  <circle cx="64" cy="64" r="62" fill="#8250df"/>
+  <g fill="none" stroke="#fff" stroke-width="${w}" stroke-linecap="round">
+    ${node(A)}${node(B)}${node(C)}
+    <path d="M${A[0]} ${A[1] + r}V${B[1] - r}"/>
+    <path d="M${A[0]} ${A[1] + r}C${A[0]} ${C[1] - 4} ${A[0] + 12} ${C[1]} ${C[0] - r} ${C[1]}"/>
+  </g>
+</svg>`;
 }
+
+const iconPng = (size) => new Resvg(iconSvg(size)).render().asPng();
 
 function assemble(target) {
   const out = `dist/${target}`;

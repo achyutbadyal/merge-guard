@@ -10,7 +10,9 @@ import { METHODS, ruleLabel, type Branches, type Method, type MethodSet, type Se
 const INTERACTIVE = 'button, summary, [role="menuitemradio"], [role="menuitem"], [role="option"], .select-menu-item';
 const MENU_CONTAINER = '[role="menu"], [role="listbox"], [role="dialog"], .select-menu-list, .select-menu-modal, ul, ol';
 const MENU_ITEM_INNER = '[role^="menuitem"], [role="option"], button';
-const SELECT_PREFERENCE: Method[] = ['squash', 'merge', 'rebase'];
+/** Merge-method dropdown toggle: classic `<details><summary>`, React `button[aria-haspopup]`. */
+const CARET = 'summary, button[aria-haspopup]:not([aria-haspopup="false"])';
+const CARET_SEARCH_DEPTH = 4;
 /** Classic PR header: `.head-ref` / `.base-ref`, titled `owner/repo:branch`. */
 const HEAD_REF = '.head-ref';
 const BASE_REF = '.base-ref';
@@ -167,12 +169,22 @@ const checkNav = (): void => {
   if (location.href !== lastHref) navigate();
 };
 
-/* ---------- auto-select an allowed method when the preselected one is blocked ---------- */
+/* ---------- auto-select the first allowed method (options order) when the preselected one is blocked ---------- */
 
 const findPrimary = (): HTMLElement | null => {
   for (const b of document.querySelectorAll<HTMLElement>('button[data-mmf-method]')) if (!inMenu(b)) return b;
   return null;
 };
+
+/** The method dropdown toggle next to the primary button; React wraps each button in its own container. */
+function findCaret(primary: HTMLElement): HTMLElement | null {
+  let scope = primary.parentElement;
+  for (let depth = 0; scope && depth < CARET_SEARCH_DEPTH; depth++, scope = scope.parentElement) {
+    const caret = Array.from(scope.querySelectorAll<HTMLElement>(CARET)).find((b) => b !== primary && !b.closest('[data-mmf-method]'));
+    if (caret) return caret;
+  }
+  return null;
+}
 
 function endSelecting(): void {
   selecting = false;
@@ -186,15 +198,13 @@ function trySelect(): void {
   if (!primary) return;
   const have = primary.getAttribute('data-mmf-method') as Method;
   if (current[have]) return endSelecting();
-  const target = SELECT_PREFERENCE.find((m) => current?.[m]);
+  const target = METHODS.find((m) => current?.[m]);
   if (!target) return; // everything disabled: leave the (disabled) controls as they are
 
   if (!selecting) {
     const sig = `${location.href}|${METHODS.filter((m) => current?.[m]).join()}`;
     if (attemptedFor === sig) return;
-    const caret = Array.from(primary.parentElement?.querySelectorAll<HTMLElement>('button, summary') ?? []).find(
-      (b) => b !== primary && !b.hasAttribute('data-mmf-method'),
-    );
+    const caret = findCaret(primary);
     if (!caret) return;
     attemptedFor = sig;
     selecting = true;

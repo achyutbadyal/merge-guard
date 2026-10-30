@@ -39,6 +39,8 @@
       <p class="muted">
         Patterns are regular expressions tested against <code>host/owner/repo/</code> from the start, ignoring case.
         <code>github\.com/acme/</code> matches every repo in <em>acme</em>; add <code>repo/</code> for one repo.
+        Optional <em>From</em> / <em>Into</em> branch regexes narrow a rule to PRs from a head branch into a base branch
+        (whole name, ignoring case; e.g. <code>release/.*</code>). Leave empty for any branch.
         The <strong>first matching rule wins</strong>, so keep specific rules above general ones.
       </p>
       <form id="quick" class="quick">
@@ -54,6 +56,12 @@
     <section class="card" aria-labelledby="h-test">
       <h2 id="h-test">Test a URL</h2>
       <input id="test-url" type="text" placeholder="https://github.com/acme/app/pull/42" autocomplete="off" spellcheck="false" aria-label="URL to test" />
+      <div class="branches test-branches">
+        <span class="muted">From</span>
+        <input id="test-head" type="text" placeholder="head branch" autocomplete="off" spellcheck="false" aria-label="Head (from) branch to test" />
+        <span class="muted">into</span>
+        <input id="test-base" type="text" placeholder="base branch" autocomplete="off" spellcheck="false" aria-label="Base (into) branch to test" />
+      </div>
       <div id="test-result" class="test-result" aria-live="polite"></div>
     </section>
   </main>

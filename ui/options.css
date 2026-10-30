@@ -41,6 +41,9 @@ p { margin: 4px 0 12px; }
 .fields { grid-area: fields; display: grid; gap: 6px; }
 .fields .pattern { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; }
 .rule .methods { grid-area: methods; }
+.branches { display: flex; gap: 8px; align-items: center; }
+.branches input { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; flex: 1; min-width: 0; }
+.test-branches { margin-top: 8px; }
 .rule-actions { position: absolute; top: 8px; right: 8px; display: flex; }
 .fields .name { padding-right: 110px; font-weight: 600; }
 .status { font-size: 12.5px; min-height: 0; }

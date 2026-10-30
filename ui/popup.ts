@@ -2,16 +2,16 @@ import { ext } from '../src/api';
 import { Matcher, normalizeKey } from '../src/matcher';
 import { escapeRegex } from '../src/pattern';
 import { loadSettings, newRuleId, saveSettings } from '../src/storage';
-import { METHODS, type MethodSet, type Settings } from '../src/types';
+import { METHODS, hasBranchFilter, ruleLabel, type MethodSet, type Settings } from '../src/types';
 import { methodToggle, toast } from './components';
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
 
 /** Add a rule for `pattern` (or update the existing one with the same pattern) at top priority. */
 async function upsert(settings: Settings, pattern: string, name: string, methods: MethodSet): Promise<void> {
-  const existing = settings.rules.find((r) => r.pattern === pattern);
+  const existing = settings.rules.find((r) => r.pattern === pattern && !hasBranchFilter(r));
   if (existing) Object.assign(existing, { enabled: true, methods: { ...methods } });
-  else settings.rules.unshift({ id: newRuleId(), name, enabled: true, pattern, methods: { ...methods } });
+  else settings.rules.unshift({ id: newRuleId(), name, enabled: true, pattern, head: '', base: '', methods: { ...methods } });
   await saveSettings(settings);
 }
 
@@ -35,7 +35,7 @@ async function init(): Promise<void> {
   const [host, owner, repo] = key.split('/') as [string, string, string];
   const res = new Matcher(settings).resolve(key);
   $('repo').textContent = `${owner}/${repo}`;
-  $('source').textContent = res.rule ? `Rule: ${res.rule.name || res.rule.pattern}` : 'Default policy';
+  $('source').textContent = `${res.rule ? `Rule: ${ruleLabel(res.rule)}` : 'Default policy'}${res.branchDependent ? ' (branch rules may override on some PRs)' : ''}`;
 
   const methods: MethodSet = { ...res.methods };
   $('methods').replaceChildren(...METHODS.map((m) => methodToggle(m, methods[m], (v) => (methods[m] = v)).el));

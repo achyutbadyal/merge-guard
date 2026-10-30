@@ -19,7 +19,20 @@ export interface PatternInfo {
   pureTail: boolean;
 }
 
+const regexError = (e: unknown): string => (e instanceof Error ? e.message.replace(/^Invalid regular expression: /, '') : 'Invalid regex');
+
 export const escapeRegex = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * A pasted URL such as `https://github.com/acme/app/pull/1` as the pattern it was meant to be
+ * (`github\.com/acme/app/`), or null when `text` is not a plain URL. Rules never see the scheme.
+ */
+export function urlToPattern(text: string): string | null {
+  if (!/^https?:\/\/[^\s*+?^${}()|[\]\\]+$/i.test(text)) return null;
+  const u = new URL(text);
+  const parts = [u.hostname, ...u.pathname.split('/').filter(Boolean).slice(0, 2)];
+  return parts.length > 1 ? `${parts.map(escapeRegex).join('/')}/` : null;
+}
 
 export function countGroups(pattern: string): number {
   return (new RegExp(pattern + '|').exec('') as RegExpExecArray).length - 1;
@@ -62,7 +75,7 @@ export function analyze(pattern: string): PatternInfo {
     try {
       new RegExp(pattern, 'i');
     } catch (e) {
-      info.error = e instanceof Error ? e.message.replace(/^Invalid regular expression: /, '') : 'Invalid regex';
+      info.error = regexError(e);
     }
   }
 
@@ -100,4 +113,16 @@ export const validatePattern = (pattern: string): string | null => analyze(patte
 export function bucketKey(prefixOrKey: string): string | null {
   const m = /^([^/]+\/[^/]+\/)/.exec(prefixOrKey);
   return m ? (m[1] as string) : null;
+}
+
+/** Branch filter as a whole-name, case-insensitive regex; null means "any branch". Throws when invalid. */
+export const compileBranch = (pattern: string): RegExp | null => (pattern ? new RegExp(`^(?:${pattern})$`, 'i') : null);
+
+export function branchError(pattern: string): string | null {
+  try {
+    compileBranch(pattern);
+    return null;
+  } catch (e) {
+    return regexError(e);
+  }
 }

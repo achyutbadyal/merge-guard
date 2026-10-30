@@ -1,4 +1,4 @@
-import { allMethods, type MethodSet, type Rule, type Settings } from '../src/types';
+import { allMethods, type Branches, type MethodSet, type Rule, type Settings } from '../src/types';
 
 export const only = (...on: Array<keyof MethodSet>): MethodSet => {
   const m = allMethods(false);
@@ -6,11 +6,13 @@ export const only = (...on: Array<keyof MethodSet>): MethodSet => {
   return m;
 };
 
-export const rule = (id: string, pattern: string, methods: MethodSet, enabled = true): Rule => ({
+export const rule = (id: string, pattern: string, methods: MethodSet, enabled = true, branches: Partial<Branches> = {}): Rule => ({
   id,
   name: id,
   enabled,
   pattern,
+  head: branches.head ?? '',
+  base: branches.base ?? '',
   methods,
 });
 

@@ -1,7 +1,7 @@
 import { classifyLabel } from './classify';
 import { Matcher, isPullPath, normalizeKey } from './matcher';
 import { loadSettings, onSettingsChanged } from './storage';
-import { METHODS, type Method, type MethodSet, type Settings } from './types';
+import { METHODS, ruleLabel, type Branches, type Method, type MethodSet, type Settings } from './types';
 
 /**
  * GitHub ships no stable hooks for the merge-method controls, so they are found by
@@ -11,6 +11,13 @@ const INTERACTIVE = 'button, summary, [role="menuitemradio"], [role="menuitem"],
 const MENU_CONTAINER = '[role="menu"], [role="listbox"], [role="dialog"], .select-menu-list, .select-menu-modal, ul, ol';
 const MENU_ITEM_INNER = '[role^="menuitem"], [role="option"], button';
 const SELECT_PREFERENCE: Method[] = ['squash', 'merge', 'rebase'];
+/** Classic PR header: `.head-ref` / `.base-ref`, titled `owner/repo:branch`. */
+const HEAD_REF = '.head-ref';
+const BASE_REF = '.base-ref';
+/** React PR header fallback: Primer BranchName links, base first ("into base from head"). */
+const BRANCH_NAME = '[class*="BranchName"]';
+/** How long to wait for the branches to render before ignoring branch rules. */
+const BRANCH_WAIT_MS = 4000;
 
 const root = document.documentElement;
 let matcher: Matcher | null = null;
@@ -19,6 +26,10 @@ let reason = '';
 let lastHref = '';
 let active = false;
 let raf = 0;
+
+let branches: Branches | null = null;
+let branchTimer = 0;
+let branchTimedOut = false;
 
 let selecting = false;
 let selectTimer = 0;
@@ -80,6 +91,31 @@ function block(e: Event): void {
 }
 for (const type of ['click', 'keydown'] as const) window.addEventListener(type, block, true);
 
+/* ---------- branches ---------- */
+
+/** Git refnames cannot contain ':', so the branch is whatever follows the last one (`owner/repo:` or `user:`). */
+const refName = (el: Element): string => (el.getAttribute('title') || el.textContent || '').trim().split(':').pop() as string;
+
+function readBranches(): Branches | null {
+  let head: Element | null | undefined = document.querySelector(HEAD_REF);
+  let base: Element | null | undefined = document.querySelector(BASE_REF);
+  if (!head || !base) {
+    const names = Array.from(document.querySelectorAll(BRANCH_NAME)).filter((el) => !el.parentElement?.closest(BRANCH_NAME));
+    [base, head] = names;
+  }
+  if (!head || !base) return null;
+  const found = { head: refName(head), base: refName(base) };
+  return found.head && found.base ? found : null;
+}
+
+/** Keeps the last branches seen on this page (headers re-render), returning true when they changed. */
+function updateBranches(): boolean {
+  const next = readBranches();
+  if (!next || (next.head === branches?.head && next.base === branches.base)) return false;
+  branches = next;
+  return true;
+}
+
 /* ---------- policy ---------- */
 
 function applyPolicy(): void {
@@ -92,10 +128,17 @@ function applyPolicy(): void {
     current = null;
     root.setAttribute('data-mmf-loading', '');
   } else {
-    const res = matcher.resolve(normalizeKey(location.href));
-    current = res.methods;
-    reason = `Disabled by Merge Guard (${res.rule ? `rule: ${res.rule.name || res.rule.pattern}` : 'default policy'}). Change it in the extension options.`;
-    root.removeAttribute('data-mmf-loading');
+    const res = matcher.resolve(normalizeKey(location.href), branches);
+    if (res.branchDependent && !branchTimedOut) {
+      current = null;
+      root.setAttribute('data-mmf-loading', '');
+    } else {
+      current = res.methods;
+      reason = `Disabled by Merge Guard (${res.rule ? `rule: ${ruleLabel(res.rule)}` : 'default policy'}).${
+        res.branchDependent ? ' The PR branches could not be read, so branch rules were skipped.' : ''
+      } Change it in the extension options.`;
+      root.removeAttribute('data-mmf-loading');
+    }
   }
   document.querySelectorAll('[data-mmf-method]').forEach(paint);
 }
@@ -103,7 +146,18 @@ function applyPolicy(): void {
 function navigate(): void {
   lastHref = location.href;
   active = isPullPath(location.pathname);
-  if (active) scan(root);
+  branches = null;
+  branchTimedOut = false;
+  clearTimeout(branchTimer);
+  if (active) {
+    scan(root);
+    updateBranches();
+    branchTimer = window.setTimeout(() => {
+      branchTimedOut = true;
+      applyPolicy();
+      schedule();
+    }, BRANCH_WAIT_MS);
+  }
   applyPolicy();
   schedule();
 }
@@ -170,6 +224,7 @@ new MutationObserver((records) => {
   if (location.href !== lastHref) return navigate();
   if (!active) return;
   for (const r of records) r.addedNodes.forEach(scan);
+  if (matcher?.hasBranchRules && updateBranches()) applyPolicy();
   schedule();
 }).observe(root, { childList: true, subtree: true });
 

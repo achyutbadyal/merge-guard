@@ -61,3 +61,28 @@ describe('findShadow', () => {
     expect(findShadow([R('all', '.*'), R('x', 'github\\.com/o/')], 1)?.id).toBe('all');
   });
 });
+
+describe('branch filters', () => {
+  const B = (id: string, p: string, base: string) => rule(id, p, allMethods(true), true, { base });
+  it('optimizeOrder puts branch-filtered rules above the same repo pattern', () => {
+    const res = optimizeOrder([R('org', 'github\\.com/o/'), B('main', 'github\\.com/o/', 'main')]);
+    expect(res.rules.map((r) => r.id)).toEqual(['main', 'org']);
+  });
+  it('a branch-filtered rule never shadows later rules', () => {
+    expect(findShadow([B('main', 'github\\.com/o/', 'main'), R('org', 'github\\.com/o/')], 1)).toBeNull();
+  });
+});
+
+describe('branch filters outrank finer tie-breaks', () => {
+  it('keeps a branch rule above a same-depth plain rule with a longer literal', () => {
+    const res = optimizeOrder([
+      rule('branch', 'github\\.com/acme', allMethods(true), true, { base: 'main' }),
+      R('plain', 'github\\.com/acme/'),
+    ]);
+    expect(res.rules.map((r) => r.id)).toEqual(['branch', 'plain']);
+  });
+  it('still puts a deeper (repo) rule above an org branch rule', () => {
+    const res = optimizeOrder([rule('branch', 'github\\.com/acme/', allMethods(true), true, { base: 'main' }), R('repo', 'github\\.com/acme/app/')]);
+    expect(res.rules.map((r) => r.id)).toEqual(['repo', 'branch']);
+  });
+});

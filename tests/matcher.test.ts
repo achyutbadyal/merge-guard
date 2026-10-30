@@ -94,3 +94,48 @@ describe('performance', () => {
     expect(m.resolve('github.com/org9999/x/').rule?.id).toBe('r9999');
   });
 });
+
+describe('branch filters', () => {
+  const intoMain = rule('main', 'github\\.com/org1/', only('squash'), true, { base: 'main' });
+  const release = rule('rel', 'github\\.com/org1/', only('merge'), true, { head: 'release/.*', base: 'main' });
+  const org = rule('org', 'github\\.com/org1/', only('rebase'));
+
+  it('applies only when both branches match (whole name, ignoring case)', () => {
+    const m = new Matcher(settings([release, intoMain, org]));
+    expect(m.resolve('github.com/org1/x/', { head: 'release/1.2', base: 'main' }).rule?.id).toBe('rel');
+    expect(m.resolve('github.com/org1/x/', { head: 'feature', base: 'main' }).rule?.id).toBe('main');
+    expect(m.resolve('github.com/org1/x/', { head: 'feature', base: 'main-old' }).rule?.id).toBe('org');
+    expect(m.resolve('github.com/org1/x/', { head: 'Release/1.2', base: 'Main' }).rule?.id).toBe('rel');
+  });
+
+  it('is skipped without branches and reports that it might apply', () => {
+    const m = new Matcher(settings([intoMain, org]));
+    const res = m.resolve('github.com/org1/x/');
+    expect(res.rule?.id).toBe('org');
+    expect(res.branchDependent).toBe(true);
+    expect(m.resolve('github.com/other/x/').branchDependent).toBe(false);
+  });
+
+  it('does not matter below the winning rule', () => {
+    const m = new Matcher(settings([org, intoMain]));
+    expect(m.resolve('github.com/org1/x/').branchDependent).toBe(false);
+    expect(m.resolve('github.com/org1/x/', { head: 'f', base: 'main' }).rule?.id).toBe('org');
+  });
+
+  it('caches per branch pair', () => {
+    const m = new Matcher(settings([intoMain]));
+    expect(m.resolve('github.com/org1/x/', { head: 'a', base: 'main' }).rule?.id).toBe('main');
+    expect(m.resolve('github.com/org1/x/', { head: 'a', base: 'dev' }).rule).toBeNull();
+  });
+
+  it('reports invalid branch regexes', () => {
+    const m = new Matcher(settings([rule('bad', 'github\\.com/', only('merge'), true, { head: '(' })]));
+    expect(m.invalid.get('bad')).toMatch(/^From branch:/);
+  });
+
+  it('matchAll includes branch rules only when branches match', () => {
+    const m = new Matcher(settings([intoMain, org]));
+    expect(m.matchAll('github.com/org1/x/').map((r) => r.id)).toEqual(['org']);
+    expect(m.matchAll('github.com/org1/x/', { head: 'a', base: 'main' }).map((r) => r.id)).toEqual(['main', 'org']);
+  });
+});

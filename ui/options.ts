@@ -1,8 +1,8 @@
 import { Matcher, normalizeKey } from '../src/matcher';
-import { escapeRegex } from '../src/pattern';
+import { escapeRegex, urlToPattern } from '../src/pattern';
 import { findShadow, optimizeOrder, type Optimization } from '../src/specificity';
 import { loadSettings, newRuleId, normalize, onSettingsChanged, saveSettings } from '../src/storage';
-import { METHODS, METHOD_LABEL, allMethods, modeOf, type DefaultMode, type MethodSet, type Rule, type Settings } from '../src/types';
+import { METHODS, METHOD_LABEL, allMethods, modeOf, ruleLabel, type Branches, type DefaultMode, type MethodSet, type Rule, type Settings } from '../src/types';
 import { h, icons, methodToggle, toast, type MethodToggle } from './components';
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
@@ -87,6 +87,29 @@ function ruleCard(rule: Rule, index: number): HTMLElement {
     rule.pattern = pattern.value;
     changed();
   });
+  pattern.addEventListener('change', () => {
+    const fixed = urlToPattern(pattern.value);
+    if (!fixed) return;
+    pattern.value = rule.pattern = fixed;
+    changed();
+    toast('Converted the URL to a pattern');
+  });
+  const branch = (field: 'head' | 'base', label: string): HTMLInputElement => {
+    const input = h('input', { type: 'text', class: 'branch', value: rule[field], placeholder: 'any branch', spellcheck: 'false', autocomplete: 'off', 'aria-label': `${label} branch` });
+    input.addEventListener('input', () => {
+      rule[field] = input.value;
+      changed();
+    });
+    return input;
+  };
+  const branches = h(
+    'div',
+    { class: 'branches' },
+    h('span', { class: 'muted' }, 'From'),
+    branch('head', 'From'),
+    h('span', { class: 'muted' }, 'into'),
+    branch('base', 'To'),
+  );
   const name = h('input', { type: 'text', class: 'name', value: rule.name, placeholder: 'Rule name (optional)', 'aria-label': 'Rule name' });
   name.addEventListener('input', () => {
     rule.name = name.value;
@@ -105,7 +128,7 @@ function ruleCard(rule: Rule, index: number): HTMLElement {
     { class: `rule${rule.enabled ? '' : ' disabled'}`, 'data-id': rule.id },
     grip,
     h('label', { class: 'sw', title: 'Enable rule' }, enabled),
-    h('div', { class: 'fields' }, name, pattern, h('div', { class: 'status' })),
+    h('div', { class: 'fields' }, name, pattern, branches, h('div', { class: 'status' })),
     h('div', { class: 'methods' }, ...toggles.map((t) => t.el)),
     h(
       'div',
@@ -179,7 +202,7 @@ function refresh(): void {
     status.textContent = err
       ? `Invalid pattern: ${err}. This rule is ignored.`
       : shadow
-        ? `Never applies: "${shadow.name || shadow.pattern}" above already matches everything this does.`
+        ? `Never applies: "${ruleLabel(shadow)}" above already matches everything this does.`
         : '';
   });
   runTester(matcher);
@@ -203,12 +226,18 @@ function runTester(matcher = new Matcher(settings)): void {
   const key = normalizeKey(/^[a-z]+:\/\//i.test(raw) ? raw : `https://${raw}`);
   if (!key) return out.replaceChildren(h('div', { class: 'muted' }, 'Enter a URL like https://github.com/owner/repo/pull/1'));
 
-  const matches = matcher.matchAll(key);
-  const res = matcher.resolve(key);
-  const lines: HTMLElement[] = [h('div', { class: 'line' }, h('span', { class: 'muted' }, 'Matched as'), h('code', {}, key))];
+  const head = ($('test-head') as HTMLInputElement).value.trim();
+  const base = ($('test-base') as HTMLInputElement).value.trim();
+  const branches: Branches | null = head || base ? { head, base } : null;
+  const matches = matcher.matchAll(key, branches);
+  const res = matcher.resolve(key, branches);
+  const lines: HTMLElement[] = [
+    h('div', { class: 'line' }, h('span', { class: 'muted' }, 'Matched as'), h('code', {}, key), branches && h('code', {}, `${head || '?'} → ${base || '?'}`)),
+  ];
+  if (res.branchDependent) lines.push(h('div', { class: 'line muted' }, 'Some rules filter by branch. Enter branches to include them.'));
   if (!matches.length) lines.push(h('div', { class: 'line' }, h('span', { class: 'winner' }, 'No rule matches. Default policy applies.')));
   for (const [i, r] of matches.entries()) {
-    lines.push(h('div', { class: 'line' }, h('span', { class: i === 0 ? 'winner' : 'muted' }, `${r.name || r.pattern}${i === 0 ? ' (applies)' : ' (shadowed)'}`)));
+    lines.push(h('div', { class: 'line' }, h('span', { class: i === 0 ? 'winner' : 'muted' }, `${ruleLabel(r)}${i === 0 ? ' (applies)' : ' (shadowed)'}`)));
     document.querySelector(`.rule[data-id="${r.id}"]`)?.classList.toggle('hit', i === 0);
   }
   lines.push(h('div', { class: 'line' }, h('span', { class: 'muted' }, 'Result'), chips(res.methods)));
@@ -218,7 +247,7 @@ function runTester(matcher = new Matcher(settings)): void {
 /* ---------- actions ---------- */
 
 function addRule(rule: Partial<Rule>): void {
-  settings.rules.unshift({ id: newRuleId(), name: '', enabled: true, pattern: '', methods: allMethods(true), ...rule });
+  settings.rules.unshift({ id: newRuleId(), name: '', enabled: true, pattern: '', head: '', base: '', methods: allMethods(true), ...rule });
   undoSnapshot = null;
   changed('rules');
   document.querySelector<HTMLInputElement>('.rule .pattern')?.focus();
@@ -243,7 +272,7 @@ function showOptimize(): void {
           'div',
           { class: `move${m.from === m.to ? ' same' : ''}` },
           h('span', { class: 'pos' }, m.from === m.to ? `${m.to + 1}` : `${m.from + 1} → ${m.to + 1}`),
-          h('span', {}, r.name || r.pattern, m.unordered ? h('span', { class: 'note' }, '  can’t auto-order (no literal prefix)') : null),
+          h('span', {}, ruleLabel(r), m.unordered ? h('span', { class: 'note' }, '  can’t auto-order (no literal prefix)') : null),
         );
       }),
     );
@@ -311,7 +340,7 @@ async function init(): Promise<void> {
     addRule({ name: org, pattern: `github\\.com/${escapeRegex(org)}/`, methods: { merge: false, squash: true, rebase: false } });
     input.value = '';
   });
-  $('test-url').addEventListener('input', () => runTester());
+  for (const id of ['test-url', 'test-head', 'test-base']) $(id).addEventListener('input', () => runTester());
 
   onSettingsChanged((s) => {
     if (JSON.stringify(s) !== lastSaved) {

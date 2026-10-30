@@ -1,4 +1,5 @@
 import { ext } from './api';
+import { urlToPattern } from './pattern';
 import { METHODS, allMethods, defaultSettings, type MethodSet, type Rule, type Settings } from './types';
 
 const KEY = 'settings';
@@ -30,7 +31,9 @@ export function normalize(raw: unknown): Settings {
           id: typeof x.id === 'string' && x.id ? x.id : newRuleId(),
           name: typeof x.name === 'string' ? x.name : '',
           enabled: x.enabled !== false,
-          pattern: typeof x.pattern === 'string' ? x.pattern : '',
+          pattern: typeof x.pattern === 'string' ? (urlToPattern(x.pattern) ?? x.pattern) : '',
+          head: typeof x.head === 'string' ? x.head : '',
+          base: typeof x.base === 'string' ? x.base : '',
           methods: toMethodSet(x.methods, true),
         }),
       );

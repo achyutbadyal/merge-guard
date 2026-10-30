@@ -14,7 +14,24 @@ export interface Rule {
   enabled: boolean;
   /** Regex source, matched case-insensitively from the start of `host/owner/repo/`. */
   pattern: string;
+  /** Regex for the PR's head ("from") branch, matched against the whole name, ignoring case. '' = any branch. */
+  head: string;
+  /** Regex for the PR's base ("to") branch, same rules as `head`. */
+  base: string;
   methods: MethodSet;
+}
+
+export interface Branches {
+  head: string;
+  base: string;
+}
+
+export const hasBranchFilter = (r: Rule): boolean => r.head !== '' || r.base !== '';
+
+/** Human-readable rule name for messages, e.g. `acme (feature/.* → main)`. */
+export function ruleLabel(r: Rule): string {
+  const name = r.name || r.pattern;
+  return hasBranchFilter(r) ? `${name} (${r.head || 'any'} → ${r.base || 'any'})` : name;
 }
 
 export interface Settings {

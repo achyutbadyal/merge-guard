@@ -32,7 +32,7 @@ function assemble(target) {
   manifest.version = JSON.parse(readFileSync('package.json', 'utf8')).version;
   if (target === 'firefox') {
     manifest.browser_specific_settings = {
-      gecko: { id: 'merge-guard@local', strict_min_version: '128.0', data_collection_permissions: { required: ['none'] } },
+      gecko: { id: 'merge-guard@achyutbadyal', strict_min_version: '128.0', data_collection_permissions: { required: ['none'] } },
     };
   }
   writeFileSync(`${out}/manifest.json`, JSON.stringify(manifest, null, 2));

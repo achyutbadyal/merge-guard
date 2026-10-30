@@ -68,7 +68,8 @@ function tagText(text: Text): void {
   const method = classifyLabel(v);
   if (!method) return;
   const el = text.parentElement?.closest(INTERACTIVE);
-  if (!el || el.hasAttribute('data-mmf-method') || el.parentElement?.closest('[data-mmf-method]')) return;
+  if (!el || el.getAttribute('data-mmf-method') === method || el.parentElement?.closest('[data-mmf-method]')) return;
+  // Retag on relabel: the primary merge button keeps its element when another method is picked.
   el.setAttribute('data-mmf-method', method);
   paint(el);
 }
@@ -223,10 +224,13 @@ function schedule(): void {
 new MutationObserver((records) => {
   if (location.href !== lastHref) return navigate();
   if (!active) return;
-  for (const r of records) r.addedNodes.forEach(scan);
+  for (const r of records) {
+    if (r.type === 'characterData') scan(r.target);
+    else r.addedNodes.forEach(scan);
+  }
   if (matcher?.hasBranchRules && updateBranches()) applyPolicy();
   schedule();
-}).observe(root, { childList: true, subtree: true });
+}).observe(root, { childList: true, subtree: true, characterData: true });
 
 document.addEventListener('turbo:load', checkNav);
 window.addEventListener('popstate', checkNav);

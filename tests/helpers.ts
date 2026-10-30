@@ -1,4 +1,4 @@
-import { allMethods, type Branches, type MethodSet, type Rule, type Settings } from '../src/types';
+import { allMethods, type MethodSet, type Rule, type Settings } from '../src/types';
 
 export const only = (...on: Array<keyof MethodSet>): MethodSet => {
   const m = allMethods(false);
@@ -6,14 +6,18 @@ export const only = (...on: Array<keyof MethodSet>): MethodSet => {
   return m;
 };
 
-export const rule = (id: string, pattern: string, methods: MethodSet, enabled = true, branches: Partial<Branches> = {}): Rule => ({
+type Scope = Partial<Pick<Rule, 'org' | 'repo' | 'head' | 'base'>>;
+
+export const rule = (id: string, scope: Scope, methods: MethodSet = allMethods(true), enabled = true): Rule => ({
   id,
   name: id,
   enabled,
-  pattern,
-  head: branches.head ?? '',
-  base: branches.base ?? '',
+  org: '',
+  repo: '',
+  head: '',
+  base: '',
+  ...scope,
   methods,
 });
 
-export const settings = (rules: Rule[], def: MethodSet = allMethods(true)): Settings => ({ version: 1, default: def, rules });
+export const settings = (rules: Rule[], def: MethodSet = allMethods(true)): Settings => ({ version: 2, default: def, rules });

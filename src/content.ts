@@ -1,5 +1,5 @@
 import { classifyLabel } from './classify';
-import { Matcher, isPullPath, normalizeKey } from './matcher';
+import { Matcher, isPullPath, targetOf } from './matcher';
 import { loadSettings, onSettingsChanged } from './storage';
 import { METHODS, ruleLabel, type Branches, type Method, type MethodSet, type Settings } from './types';
 
@@ -128,7 +128,7 @@ function applyPolicy(): void {
     current = null;
     root.setAttribute('data-mmf-loading', '');
   } else {
-    const res = matcher.resolve(normalizeKey(location.href), branches);
+    const res = matcher.resolve(targetOf(location.href), branches);
     if (res.branchDependent && !branchTimedOut) {
       current = null;
       root.setAttribute('data-mmf-loading', '');

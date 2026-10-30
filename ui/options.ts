@@ -1,8 +1,7 @@
-import { Matcher, normalizeKey } from '../src/matcher';
-import { escapeRegex, urlToPattern } from '../src/pattern';
+import { Matcher, type Target } from '../src/matcher';
 import { findShadow, optimizeOrder, type Optimization } from '../src/specificity';
 import { loadSettings, newRuleId, normalize, onSettingsChanged, saveSettings } from '../src/storage';
-import { METHODS, METHOD_LABEL, allMethods, modeOf, ruleLabel, type Branches, type DefaultMode, type MethodSet, type Rule, type Settings } from '../src/types';
+import { HOST, METHODS, METHOD_LABEL, allMethods, modeOf, ruleLabel, type Branches, type DefaultMode, type MethodSet, type Rule, type Settings } from '../src/types';
 import { h, icons, methodToggle, toast, type MethodToggle } from './components';
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
@@ -82,33 +81,32 @@ function ruleCard(rule: Rule, index: number): HTMLElement {
       changed();
     }),
   );
-  const pattern = h('input', { type: 'text', class: 'pattern', value: rule.pattern, placeholder: 'github\\.com/acme/', spellcheck: 'false', autocomplete: 'off', 'aria-label': 'Pattern' });
-  pattern.addEventListener('input', () => {
-    rule.pattern = pattern.value;
-    changed();
-  });
-  pattern.addEventListener('change', () => {
-    const fixed = urlToPattern(pattern.value);
-    if (!fixed) return;
-    pattern.value = rule.pattern = fixed;
-    changed();
-    toast('Converted the URL to a pattern');
-  });
-  const branch = (field: 'head' | 'base', label: string): HTMLInputElement => {
-    const input = h('input', { type: 'text', class: 'branch', value: rule[field], placeholder: 'any branch', spellcheck: 'false', autocomplete: 'off', 'aria-label': `${label} branch` });
-    input.addEventListener('input', () => {
-      rule[field] = input.value;
+  const input = (key: 'org' | 'repo' | 'head' | 'base', placeholder: string, label: string): HTMLInputElement => {
+    const el = h('input', { type: 'text', class: key, value: rule[key], placeholder, spellcheck: 'false', autocomplete: 'off', 'aria-label': label });
+    el.addEventListener('input', () => {
+      rule[key] = el.value.trim();
       changed();
     });
-    return input;
+    return el;
   };
+  const org = input('org', 'any org', 'Org');
+  const repo = input('repo', 'any repo', 'Repo');
+  // Pasting `owner/repo` or a GitHub URL into the org field fills both.
+  org.addEventListener('change', () => {
+    const t = parseScope(org.value);
+    if (!t || !org.value.includes('/')) return;
+    org.value = rule.org = t.org;
+    repo.value = rule.repo = t.repo;
+    changed();
+  });
+  const scope = h('div', { class: 'inline' }, h('span', { class: 'muted mono' }, HOST), '/', org, '/', repo);
   const branches = h(
     'div',
-    { class: 'branches' },
+    { class: 'inline' },
     h('span', { class: 'muted' }, 'From'),
-    branch('head', 'From'),
+    input('head', 'any branch', 'From branch'),
     h('span', { class: 'muted' }, 'into'),
-    branch('base', 'To'),
+    input('base', 'any branch', 'Into branch'),
   );
   const name = h('input', { type: 'text', class: 'name', value: rule.name, placeholder: 'Rule name (optional)', 'aria-label': 'Rule name' });
   name.addEventListener('input', () => {
@@ -128,7 +126,7 @@ function ruleCard(rule: Rule, index: number): HTMLElement {
     { class: `rule${rule.enabled ? '' : ' disabled'}`, 'data-id': rule.id },
     grip,
     h('label', { class: 'sw', title: 'Enable rule' }, enabled),
-    h('div', { class: 'fields' }, name, pattern, branches, h('div', { class: 'status' })),
+    h('div', { class: 'fields' }, name, scope, branches, h('div', { class: 'status' })),
     h('div', { class: 'methods' }, ...toggles.map((t) => t.el)),
     h(
       'div',
@@ -189,23 +187,17 @@ function renderRules(): void {
   refresh();
 }
 
-/** Cheap in-place status refresh (validation, shadow warnings, tester) without rebuilding inputs. */
+/** Cheap in-place status refresh (shadow warnings, tester) without rebuilding inputs. */
 function refresh(): void {
-  const matcher = new Matcher(settings);
   const cards = $('rules').children;
   settings.rules.forEach((rule, i) => {
     const status = cards[i]?.querySelector('.status');
     if (!status) return;
-    const err = matcher.invalid.get(rule.id) ?? (rule.pattern ? null : 'Pattern is empty');
-    const shadow = err ? null : findShadow(settings.rules, i);
-    status.className = `status ${err ? 'err' : shadow ? 'warn' : ''}`;
-    status.textContent = err
-      ? `Invalid pattern: ${err}. This rule is ignored.`
-      : shadow
-        ? `Never applies: "${ruleLabel(shadow)}" above already matches everything this does.`
-        : '';
+    const shadow = findShadow(settings.rules, i);
+    status.className = `status ${shadow ? 'warn' : ''}`;
+    status.textContent = shadow ? `Never applies: "${ruleLabel(shadow)}" above already matches everything this does.` : '';
   });
-  runTester(matcher);
+  runTester();
 }
 
 /* ---------- tester ---------- */
@@ -218,21 +210,44 @@ function chips(m: MethodSet): HTMLElement {
   );
 }
 
+/**
+ * Org and repo from `owner`, `owner/repo` or a github.com URL (any page in the repo). The repo is ''
+ * for an org on its own; null for other hosts or empty input.
+ */
+function parseScope(text: string): Target | null {
+  const s = text.trim().replace(/\\/g, '').replace(/^[a-z]+:\/\//i, '');
+  const parts = s.split(/[/?#]/).filter(Boolean);
+  if (parts[0]?.includes('.')) {
+    if (parts[0].toLowerCase() !== HOST) return null;
+    parts.shift();
+  }
+  const [org, repo = ''] = parts;
+  return org ? { org, repo } : null;
+}
+
 function runTester(matcher = new Matcher(settings)): void {
   const out = $('test-result');
   document.querySelectorAll('.rule.hit').forEach((c) => c.classList.remove('hit'));
-  const raw = ($('test-url') as HTMLInputElement).value.trim();
-  if (!raw) return out.replaceChildren();
-  const key = normalizeKey(/^[a-z]+:\/\//i.test(raw) ? raw : `https://${raw}`);
-  if (!key) return out.replaceChildren(h('div', { class: 'muted' }, 'Enter a URL like https://github.com/owner/repo/pull/1'));
+  const raw = ($('test-url') as HTMLInputElement).value;
+  if (!raw.trim()) return out.replaceChildren();
+  const scope = parseScope(raw);
+  const target = scope && { org: scope.org.toLowerCase(), repo: scope.repo.toLowerCase() };
+  if (!target) return out.replaceChildren(h('div', { class: 'muted' }, `Enter an org, owner/repo or ${HOST} URL, e.g. acme/app`));
 
   const head = ($('test-head') as HTMLInputElement).value.trim();
   const base = ($('test-base') as HTMLInputElement).value.trim();
   const branches: Branches | null = head || base ? { head, base } : null;
-  const matches = matcher.matchAll(key, branches);
-  const res = matcher.resolve(key, branches);
+  const matches = matcher.matchAll(target, branches);
+  const res = matcher.resolve(target, branches);
   const lines: HTMLElement[] = [
-    h('div', { class: 'line' }, h('span', { class: 'muted' }, 'Matched as'), h('code', {}, key), branches && h('code', {}, `${head || '?'} → ${base || '?'}`)),
+    h(
+      'div',
+      { class: 'line' },
+      h('span', { class: 'muted' }, 'Testing'),
+      h('code', {}, `${target.org}/${target.repo || '…'}`),
+      !target.repo && h('span', { class: 'muted' }, '(no repo: only rules for any repo match)'),
+      branches && h('code', {}, `${head || '?'} → ${base || '?'}`),
+    ),
   ];
   if (res.branchDependent) lines.push(h('div', { class: 'line muted' }, 'Some rules filter by branch. Enter branches to include them.'));
   if (!matches.length) lines.push(h('div', { class: 'line' }, h('span', { class: 'winner' }, 'No rule matches. Default policy applies.')));
@@ -247,10 +262,10 @@ function runTester(matcher = new Matcher(settings)): void {
 /* ---------- actions ---------- */
 
 function addRule(rule: Partial<Rule>): void {
-  settings.rules.unshift({ id: newRuleId(), name: '', enabled: true, pattern: '', head: '', base: '', methods: allMethods(true), ...rule });
+  settings.rules.unshift({ id: newRuleId(), name: '', enabled: true, org: '', repo: '', head: '', base: '', methods: allMethods(true), ...rule });
   undoSnapshot = null;
   changed('rules');
-  document.querySelector<HTMLInputElement>('.rule .pattern')?.focus();
+  document.querySelector<HTMLInputElement>('.rule .org')?.focus();
 }
 
 function showOptimize(): void {
@@ -265,14 +280,14 @@ function showOptimize(): void {
     body.replaceChildren(h('p', { class: 'muted' }, 'Rules are already ordered from most to least specific.'));
   } else {
     body.replaceChildren(
-      h('p', { class: 'muted' }, 'Most specific rules first (longer literal paths, then exact matches). Disabled and invalid rules stay where they are.'),
+      h('p', { class: 'muted' }, 'Most specific first: exact names before wildcards before "any", comparing org, then repo, then branches. Disabled rules stay where they are.'),
       ...opt.moves.map((m) => {
         const r = byId.get(m.id) as Rule;
         return h(
           'div',
           { class: `move${m.from === m.to ? ' same' : ''}` },
           h('span', { class: 'pos' }, m.from === m.to ? `${m.to + 1}` : `${m.from + 1} → ${m.to + 1}`),
-          h('span', {}, ruleLabel(r), m.unordered ? h('span', { class: 'note' }, '  can’t auto-order (no literal prefix)') : null),
+          h('span', {}, ruleLabel(r)),
         );
       }),
     );
@@ -310,7 +325,7 @@ async function init(): Promise<void> {
   renderDefault();
   renderRules();
 
-  $('add').addEventListener('click', () => addRule({ pattern: 'github\\.com/' }));
+  $('add').addEventListener('click', () => addRule({}));
   $('optimize').addEventListener('click', showOptimize);
   $('undo').addEventListener('click', () => {
     if (!undoSnapshot) return;
@@ -335,9 +350,9 @@ async function init(): Promise<void> {
   $('quick').addEventListener('submit', (e) => {
     e.preventDefault();
     const input = $<HTMLInputElement>('quick-org');
-    const org = input.value.trim().replace(/^\/+|\/+$/g, '');
+    const org = parseScope(input.value)?.org;
     if (!org) return;
-    addRule({ name: org, pattern: `github\\.com/${escapeRegex(org)}/`, methods: { merge: false, squash: true, rebase: false } });
+    addRule({ org, methods: { merge: false, squash: true, rebase: false } });
     input.value = '';
   });
   for (const id of ['test-url', 'test-head', 'test-base']) $(id).addEventListener('input', () => runTester());

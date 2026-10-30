@@ -1,128 +1,63 @@
 /**
- * Static analysis of a user-supplied regex source. Everything here is purely
- * syntactic and deliberately conservative: when unsure, report "no literal prefix".
+ * Rule fields are globs: `*` matches any run of characters (including `/` in branch names), everything
+ * else is literal, compared ignoring case. An empty field (or a lone `*`) matches anything.
  */
-
-const LITERAL_ESCAPES = '.^$*+?()[]{}|/\\-';
-
-export interface PatternInfo {
-  /** Error that makes the pattern unusable, or null. */
-  error: string | null;
-  /** Lower-cased literal text every match must start with ('' if unknown). */
-  prefix: string;
-  /** Top-level alternation (a|b): prefix is unreliable. */
-  topAlt: boolean;
-  /** Count of wildcard-ish tokens (., *, +, ?, {, classes, \d ...). */
-  wildcards: number;
-  endAnchor: boolean;
-  /** Pattern is just the literal prefix, optionally followed by `.*`. */
-  pureTail: boolean;
-}
-
-const regexError = (e: unknown): string => (e instanceof Error ? e.message.replace(/^Invalid regular expression: /, '') : 'Invalid regex');
 
 export const escapeRegex = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
+export const isAny = (glob: string): boolean => /^\**$/.test(glob);
+export const isExact = (glob: string): boolean => glob !== '' && !glob.includes('*');
+
+/** Whole-name, case-insensitive regex for a glob; null when it matches anything. */
+export const compileGlob = (glob: string): RegExp | null =>
+  isAny(glob) ? null : new RegExp(`^${glob.split('*').map(escapeRegex).join('.*')}$`, 'i');
+
+export const fits = (re: RegExp | null, name: string): boolean => !re || re.test(name);
+
+/** True when glob `a` certainly matches every name glob `b` matches. Conservative. */
+export function covers(a: string, b: string): boolean {
+  if (isAny(a)) return true;
+  if (isAny(b)) return false;
+  if (a.toLowerCase() === b.toLowerCase()) return true;
+  return isExact(b) && (compileGlob(a) as RegExp).test(b);
+}
+
+/** 2 = exact name, 1 = glob, 0 = any. */
+export const rank = (glob: string): number => (isAny(glob) ? 0 : isExact(glob) ? 2 : 1);
+
+/* ---------- migration from v1 regex rules ---------- */
+
 /**
- * A pasted URL such as `https://github.com/acme/app/pull/1` as the pattern it was meant to be
- * (`github\.com/acme/app/`), or null when `text` is not a plain URL. Rules never see the scheme.
+ * A v1 regex that only uses literals, `\x` escapes of punctuation and `.*` / `[^/]*` wildcards, as a glob.
+ * A lone `.` is read as a literal dot (people wrote `github.com`). Null when it uses anything else.
  */
-export function urlToPattern(text: string): string | null {
-  if (!/^https?:\/\/[^\s*+?^${}()|[\]\\]+$/i.test(text)) return null;
-  const u = new URL(text);
-  const parts = [u.hostname, ...u.pathname.split('/').filter(Boolean).slice(0, 2)];
-  return parts.length > 1 ? `${parts.map(escapeRegex).join('/')}/` : null;
-}
-
-export function countGroups(pattern: string): number {
-  return (new RegExp(pattern + '|').exec('') as RegExpExecArray).length - 1;
-}
-
-export function analyze(pattern: string): PatternInfo {
-  const info: PatternInfo = { error: null, prefix: '', topAlt: false, wildcards: 0, endAnchor: false, pureTail: false };
-  if (!pattern) {
-    info.error = 'Pattern is empty';
-    return info;
-  }
-
-  let depth = 0;
-  let inClass = false;
-  for (let i = 0; i < pattern.length; i++) {
-    const c = pattern[i] as string;
-    if (c === '\\') {
-      const n = pattern[i + 1];
-      if (n !== undefined && n >= '1' && n <= '9' && !inClass) info.error = 'Numeric backreferences are not supported';
-      if (n !== undefined && !LITERAL_ESCAPES.includes(n)) info.wildcards++;
+export function regexToGlob(src: string): string | null {
+  let out = '';
+  for (let i = 0; i < src.length; i++) {
+    const c = src[i] as string;
+    const wild = ['.*', '.+', '[^/]*', '[^/]+'].find((w) => src.startsWith(w, i));
+    if (wild) {
+      out += '*';
+      i += wild.length - 1;
+    } else if (c === '\\') {
+      const n = src[i + 1];
+      if (n === undefined || /\w/.test(n)) return null;
+      out += n;
       i++;
-      continue;
-    }
-    if (inClass) {
-      if (c === ']') inClass = false;
-      continue;
-    }
-    if (c === '[') {
-      inClass = true;
-      info.wildcards++;
-    } else if (c === '(') {
-      depth++;
-      if (pattern.startsWith('(?<', i) && !'=!'.includes(pattern[i + 3] ?? '')) info.error = 'Named groups are not supported';
-    } else if (c === ')') depth--;
-    else if (c === '|' && depth === 0) info.topAlt = true;
-    else if ('.*+?{'.includes(c)) info.wildcards++;
+    } else if (c === '.') out += '.';
+    else if ('^$*+?()[]{}|'.includes(c)) return null;
+    else out += c;
   }
-
-  if (!info.error) {
-    try {
-      new RegExp(pattern, 'i');
-    } catch (e) {
-      info.error = regexError(e);
-    }
-  }
-
-  info.endAnchor = pattern.endsWith('$') && !pattern.endsWith('\\$');
-
-  let k = pattern[0] === '^' ? 1 : 0;
-  let prefix = '';
-  while (k < pattern.length) {
-    const c = pattern[k] as string;
-    if (c === '\\') {
-      const n = pattern[k + 1];
-      if (n !== undefined && LITERAL_ESCAPES.includes(n)) {
-        prefix += n;
-        k += 2;
-        continue;
-      }
-      break;
-    }
-    if ('.*+?()[]{}|$^'.includes(c)) break;
-    prefix += c;
-    k++;
-  }
-  // A quantifier that can drop the last literal (x?, x*, x{0,}) makes it optional.
-  if (prefix && k < pattern.length && '*?{'.includes(pattern[k] as string)) prefix = prefix.slice(0, -1);
-
-  const rest = pattern.slice(k);
-  info.prefix = info.topAlt ? '' : prefix.toLowerCase();
-  info.pureTail = !info.topAlt && (rest === '' || rest === '.*');
-  return info;
+  return out;
 }
 
-export const validatePattern = (pattern: string): string | null => analyze(pattern).error;
-
-/** Bucket key `host/owner/` if the literal prefix pins down the owner, else null. */
-export function bucketKey(prefixOrKey: string): string | null {
-  const m = /^([^/]+\/[^/]+\/)/.exec(prefixOrKey);
-  return m ? (m[1] as string) : null;
-}
-
-/** Branch filter as a whole-name, case-insensitive regex; null means "any branch". Throws when invalid. */
-export const compileBranch = (pattern: string): RegExp | null => (pattern ? new RegExp(`^(?:${pattern})$`, 'i') : null);
-
-export function branchError(pattern: string): string | null {
-  try {
-    compileBranch(pattern);
-    return null;
-  } catch (e) {
-    return regexError(e);
-  }
+/** Org and repo globs for a v1 `host/owner/repo/` regex, or null when it can't be expressed as fields. */
+export function legacyScope(pattern: string): { org: string; repo: string } | null {
+  const glob = regexToGlob(pattern.replace(/^\^/, '').replace(/\$$/, ''));
+  if (glob === null) return null;
+  const rest = glob.replace(/^https?:\/\//i, '');
+  if (isAny(rest)) return { org: '', repo: '' };
+  const [host, org = '', repo = '', ...extra] = rest.split('/');
+  if (host?.toLowerCase() !== 'github.com' || extra.some((s) => !isAny(s))) return null;
+  return { org: isAny(org) ? '' : org, repo: isAny(repo) ? '' : repo };
 }

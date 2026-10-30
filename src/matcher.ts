@@ -1,18 +1,23 @@
-import { analyze, branchError, bucketKey, compileBranch, countGroups } from './pattern';
-import { allMethods, hasBranchFilter, type Branches, type MethodSet, type Rule, type Settings } from './types';
+import { compileGlob, fits, isExact } from './pattern';
+import { HOST, allMethods, hasBranchFilter, type Branches, type MethodSet, type Rule, type Settings } from './types';
 
-/** `host/owner/repo/` (lower-cased, trailing slash) for a GitHub URL, or null. */
-export function normalizeKey(url: string): string | null {
+/** The repo a page belongs to, lower-cased. */
+export interface Target {
+  org: string;
+  repo: string;
+}
+
+/** Owner and repo of a github.com URL, or null. */
+export function targetOf(url: string): Target | null {
   let u: URL;
   try {
     u = new URL(url);
   } catch {
     return null;
   }
-  if (u.protocol !== 'https:' && u.protocol !== 'http:') return null;
-  const [owner, repo] = u.pathname.split('/').filter(Boolean);
-  if (!owner || !repo) return null;
-  return `${u.hostname}/${owner}/${repo}/`.toLowerCase();
+  if ((u.protocol !== 'https:' && u.protocol !== 'http:') || u.hostname.toLowerCase() !== HOST) return null;
+  const [org, repo] = u.pathname.split('/').filter(Boolean);
+  return org && repo ? { org: org.toLowerCase(), repo: repo.toLowerCase() } : null;
 }
 
 export const isPullPath = (pathname: string): boolean => /^\/[^/]+\/[^/]+\/pull\/\d+/.test(pathname);
@@ -21,47 +26,11 @@ interface Entry {
   rule: Rule;
   /** Position in the user's rule list; lower wins. */
   index: number;
-}
-
-/** A rule with branch filters, tested on its own after the repo-only lookup. */
-interface BranchEntry extends Entry {
-  repo: RegExp;
+  org: RegExp | null;
+  repo: RegExp | null;
   head: RegExp | null;
   base: RegExp | null;
-}
-
-const fits = (re: RegExp | null, name: string): boolean => !re || re.test(name);
-
-/**
- * Rules compiled into ONE sticky alternation `(p0)|(p1)|...`. The engine tries
- * alternatives left to right at position 0, so the first matching rule wins
- * without us looping over rules in JS. Which alternative matched is read from the
- * capture groups (offset-adjusted for groups inside user patterns).
- */
-class Group {
-  private readonly re: RegExp;
-  private readonly offsets: number[] = [];
-
-  constructor(private readonly entries: Entry[]) {
-    let next = 1;
-    const sources: string[] = [];
-    for (const { rule } of entries) {
-      this.offsets.push(next);
-      next += 1 + countGroups(rule.pattern);
-      sources.push(`(${rule.pattern})`);
-    }
-    this.re = new RegExp(sources.join('|'), 'iy');
-  }
-
-  first(key: string): Entry | null {
-    this.re.lastIndex = 0;
-    const m = this.re.exec(key);
-    if (!m) return null;
-    for (let j = 0; j < this.offsets.length; j++) {
-      if (m[this.offsets[j] as number] !== undefined) return this.entries[j] as Entry;
-    }
-    return null;
-  }
+  branched: boolean;
 }
 
 export interface Resolution {
@@ -74,53 +43,53 @@ export interface Resolution {
 
 const CACHE_SIZE = 500;
 
+/** Yields entries from two index-ordered lists in index order. */
+function* merged(a: Entry[], b: Entry[]): Generator<Entry> {
+  let i = 0;
+  let j = 0;
+  while (i < a.length || j < b.length) {
+    if (j >= b.length || (i < a.length && (a[i] as Entry).index < (b[j] as Entry).index)) yield a[i++] as Entry;
+    else yield b[j++] as Entry;
+  }
+}
+
 export class Matcher {
-  /** Rule id -> error, for rules that were skipped because they are invalid. */
-  readonly invalid = new Map<string, string>();
-  private readonly buckets = new Map<string, Group>();
-  private readonly generic: Group | null;
-  /** Branch-filtered rules in list order. Expected to be few, so they are scanned linearly. */
-  private readonly branched: BranchEntry[] = [];
+  /** Rules naming one exact org, keyed by that org lower-cased: a lookup only touches its own org's rules. */
+  private readonly byOrg = new Map<string, Entry[]>();
+  /** Rules with an org glob or any org, in list order. */
+  private readonly other: Entry[] = [];
+  private readonly all: Entry[] = [];
   private readonly cache = new Map<string, Resolution>();
 
   constructor(private readonly settings: Settings) {
-    const generic: Entry[] = [];
-    const byOwner = new Map<string, Entry[]>();
-
     settings.rules.forEach((rule, index) => {
       if (!rule.enabled) return;
-      const info = analyze(rule.pattern);
-      const head = branchError(rule.head);
-      const base = branchError(rule.base);
-      const error = info.error ?? (head && `From branch: ${head}`) ?? (base && `To branch: ${base}`);
-      if (error) {
-        this.invalid.set(rule.id, error);
-        return;
-      }
-      const entry: Entry = { rule, index };
-      if (hasBranchFilter(rule)) {
-        this.branched.push({ ...entry, repo: new RegExp(`^(?:${rule.pattern})`, 'i'), head: compileBranch(rule.head), base: compileBranch(rule.base) });
-        return;
-      }
-      const bk = info.prefix ? bucketKey(info.prefix) : null;
-      if (!bk) return void generic.push(entry);
-      const list = byOwner.get(bk);
+      const entry: Entry = {
+        rule,
+        index,
+        org: compileGlob(rule.org),
+        repo: compileGlob(rule.repo),
+        head: compileGlob(rule.head),
+        base: compileGlob(rule.base),
+        branched: hasBranchFilter(rule),
+      };
+      this.all.push(entry);
+      if (!isExact(rule.org)) return void this.other.push(entry);
+      const key = rule.org.toLowerCase();
+      const list = this.byOrg.get(key);
       if (list) list.push(entry);
-      else byOwner.set(bk, [entry]);
+      else this.byOrg.set(key, [entry]);
     });
-
-    for (const [k, entries] of byOwner) this.buckets.set(k, new Group(entries));
-    this.generic = generic.length ? new Group(generic) : null;
   }
 
   get hasBranchRules(): boolean {
-    return this.branched.length > 0;
+    return this.all.some((e) => e.branched);
   }
 
   /** Without `branches`, branch-filtered rules are skipped and `branchDependent` says whether that mattered. */
-  resolve(key: string | null, branches: Branches | null = null): Resolution {
-    if (!key) return { methods: this.settings.default, rule: null, branchDependent: false };
-    const ck = branches ? `${key}\0${branches.head}\0${branches.base}` : key;
+  resolve(target: Target | null, branches: Branches | null = null): Resolution {
+    if (!target) return { methods: this.settings.default, rule: null, branchDependent: false };
+    const ck = `${target.org}/${target.repo}${branches ? `\0${branches.head}\0${branches.base}` : ''}`;
     const cached = this.cache.get(ck);
     if (cached) {
       this.cache.delete(ck);
@@ -128,19 +97,12 @@ export class Matcher {
       return cached;
     }
 
-    const bk = bucketKey(key);
-    const a = bk ? (this.buckets.get(bk)?.first(key) ?? null) : null;
-    const b = this.generic?.first(key) ?? null;
-    let win = a && b ? (a.index < b.index ? a : b) : (a ?? b);
+    let win: Entry | null = null;
     let branchDependent = false;
-    for (const e of this.branched) {
-      if (win && e.index > win.index) break;
-      if (!e.repo.test(key)) continue;
-      if (!branches) {
-        branchDependent = true;
-        break;
-      }
-      if (fits(e.head, branches.head) && fits(e.base, branches.base)) {
+    for (const e of merged(this.byOrg.get(target.org) ?? [], this.other)) {
+      const state = this.test(e, target, branches);
+      if (state === 'unknown') branchDependent = true;
+      if (state === 'match') {
         win = e;
         break;
       }
@@ -154,17 +116,17 @@ export class Matcher {
     return res;
   }
 
-  /** Every enabled, valid rule matching, in priority order. O(n); for the UI tester only. */
-  matchAll(key: string, branches: Branches | null = null): Rule[] {
-    const out: Rule[] = [];
-    for (const rule of this.settings.rules) {
-      if (!rule.enabled || this.invalid.has(rule.id)) continue;
-      if (!new RegExp(`(?:${rule.pattern})`, 'iy').test(key)) continue;
-      if (hasBranchFilter(rule) && !(branches && fits(compileBranch(rule.head), branches.head) && fits(compileBranch(rule.base), branches.base))) continue;
-      out.push(rule);
-    }
-    return out;
+  /** Every enabled rule matching, in priority order. For the UI tester. */
+  matchAll(target: Target, branches: Branches | null = null): Rule[] {
+    return this.all.filter((e) => this.test(e, target, branches) === 'match').map((e) => e.rule);
+  }
+
+  private test(e: Entry, t: Target, branches: Branches | null): 'match' | 'miss' | 'unknown' {
+    if (!fits(e.org, t.org) || !fits(e.repo, t.repo)) return 'miss';
+    if (!e.branched) return 'match';
+    if (!branches) return 'unknown';
+    return fits(e.head, branches.head) && fits(e.base, branches.base) ? 'match' : 'miss';
   }
 }
 
-export const emptyMatcher = (): Matcher => new Matcher({ version: 1, default: allMethods(true), rules: [] });
+export const emptyMatcher = (): Matcher => new Matcher({ version: 2, default: allMethods(true), rules: [] });

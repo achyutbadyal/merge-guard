@@ -29,6 +29,7 @@ function assemble(target) {
   const out = `dist/${target}`;
   mkdirSync(`${out}/icons`, { recursive: true });
   const manifest = JSON.parse(readFileSync('static/manifest.json', 'utf8'));
+  manifest.version = JSON.parse(readFileSync('package.json', 'utf8')).version;
   if (target === 'firefox') {
     manifest.browser_specific_settings = {
       gecko: { id: 'merge-guard@local', strict_min_version: '128.0', data_collection_permissions: { required: ['none'] } },

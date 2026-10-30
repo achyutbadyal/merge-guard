@@ -5,3 +5,5 @@ dist
 !.yarn/patches
 *.zip
 .DS_Store
+.env
+release
